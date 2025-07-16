@@ -199,7 +199,7 @@ function Middleware.c_select_blind()
             end
         end
         return false
-    end, 
+    end,
 
     function(_action)
         local _blind_obj = G.blind_select_opts[string.lower(_blind_on_deck)]
@@ -219,11 +219,13 @@ end
 
 
 function Middleware.c_choose_booster_cards()
-
+    sendDebugMessage("Start of outer booster card function!")
     if Middleware.choosingboostercards == true then return end
     if not G.pack_cards.cards then return end
 
     Middleware.choosingboostercards = true
+    
+    sendDebugMessage("Passed checks!")
 
     firewhenready(function()
         local _action, _card, _hand_cards = Bot.select_booster_action(G.pack_cards.cards, G.hand.cards)
@@ -235,69 +237,109 @@ function Middleware.c_choose_booster_cards()
     end,
 
     function(_action, _card, _hand_cards)
+        sendDebugMessage("Start of inner booster card function!")
         if _action == Bot.ACTIONS.SKIP_BOOSTER_PACK then
             pushbutton(Middleware.BUTTONS.SKIP_PACK)
+            if G.GAME.PACK_INTERRUPT == G.STATES.BLIND_SELECT then
+                sendDebugMessage("Queueing blind select action!")
+                queueaction(function()
+                        firewhenready(function()
+                            return G.STATE_COMPLETE and G.STATE == G.STATES.BLIND_SELECT
+                        end, function()
+                            Middleware.choosingboostercards = false
+                            Middleware.c_select_blind()
+                        end)
+                    end, 0.0)
+            elseif G.GAME.PACK_INTERRUPT == G.STATES.SHOP then
+                queueaction(function()
+                    sendDebugMessage("Queueing shop action!")
+                    firewhenready(function()
+                        return G.STATE_COMPLETE and G.STATE == G.STATES.SHOP
+                    end, function()
+                        Middleware.choosingboostercards = false
+                        Middleware.c_shop()
+                    end)
+                end, 0.0)
+            end
         elseif _action == Bot.ACTIONS.SELECT_BOOSTER_CARD then
-            -- Click each card from your deck first (only occurs if _pack_card is consumable)
-            -- Note: Adjusted to make sure _hand_cards is not nil (or an empty array)
-            -- Some tarot/joker cards don't need cards selected in the deck to be utilised
-            if (_hand_cards ~= nil) then
-                for i = 1, #_hand_cards do
-                    clickcard(G.hand.cards[_hand_cards[i]])
+            -- Defensive: Ensure _card and _card[1] are valid
+            local card_index = _card and _card[1]
+            local selected_card = nil
+            if card_index and G.pack_cards and G.pack_cards.cards then
+                selected_card = card_index and G.pack_cards.cards[card_index]
+            end
+            local max_highlighted = 0
+            if selected_card and selected_card.ability and selected_card.ability.max_highlighted then
+                max_highlighted = selected_card.ability.max_highlighted
+            end
+
+            -- Defensive: Ensure _hand_cards is a table
+            if type(_hand_cards) ~= "table" then
+                _hand_cards = {}
+            end
+
+            -- Pad or trim _hand_cards to match max_highlighted
+            if max_highlighted > 0 then
+                while #_hand_cards < max_highlighted do
+                    table.insert(_hand_cards, #_hand_cards + 1)
+                end
+                while #_hand_cards > max_highlighted do
+                    table.remove(_hand_cards)
                 end
             end
 
-            -- Then select the booster card to activate
-            clickcard(G.pack_cards.cards[_card[1]])
-            usecard(G.pack_cards.cards[_card[1]])
-
-            -- Could we possibly process both card selections in the one go?
-            -- Trying to fix the current issue that happens when you have to make two selections in a booster pack.
-            if G.GAME.pack_choices and G.GAME.pack_choices -1 > 0 then
-                clickcard(G.pack_cards.cards[_card[2]], 2)
-                usecard(G.pack_cards.cards[_card[2]], 2)
+            -- Click each card from your deck first (only occurs if _pack_card is consumable)
+            if (_hand_cards ~= nil) then
+                for i = 1, #_hand_cards do
+                    if G.hand.cards and G.hand.cards[_hand_cards[i]] then
+                        clickcard(G.hand.cards[_hand_cards[i]])
+                    end
+                end
             end
-        end
 
-        -- We dont need to re-send this event if we're trying to do it in the one go.
-        -- This is the best way I was able to solve this small bug. It'll do for now.
-        --
-        -- if G.GAME.pack_choices and G.GAME.pack_choices -1 > 0 and G.STATE == 999 then
-        --     sendDebugMessage("Queueing choose booster card action!")
-        --     queueaction(function()
-        --         firewhenready(function()
-        --             return Middleware.BUTTONS.SKIP_PACK ~= nil and
-        --             Middleware.BUTTONS.SKIP_PACK.config.button == 'skip_booster' and
-        --             Middleware.choosingboostercards == false and
-        --             G and G.pack_cards and G.pack_cards.cards
-        --         end, function()
-        --             Middleware.c_choose_booster_cards()
-        --         end)
-        --     end, 0.0)
-        if G.GAME.PACK_INTERRUPT == G.STATES.BLIND_SELECT then
-            sendDebugMessage("Queueing blind select action!")
-            queueaction(function()
+            sendDebugMessage(G.STATE)
+            sendDebugMessage(G.GAME.pack_choices)
+            -- actually make the change
+            if selected_card then
+                clickcard(selected_card)
+                usecard(selected_card)
+            end
+            
+            Middleware.choosingboostercards = false
+
+            -- if we have more choices to make, re-queue the action
+            if G.GAME.pack_choices and G.GAME.pack_choices - 1 > 1 then
+                sendDebugMessage("Re-queueing choose booster card action!")
+                queueaction(function()
+                    Middleware.choosingboostercards = false
+                    Middleware.c_choose_booster_cards()
+                end, 0.0)
+                return
+            elseif G.GAME.PACK_INTERRUPT == G.STATES.BLIND_SELECT then
+                sendDebugMessage("Queueing blind select action!")
+                queueaction(function()
+                        firewhenready(function()
+                            return G.STATE_COMPLETE and G.STATE == G.STATES.BLIND_SELECT
+                        end, function()
+                            Middleware.choosingboostercards = false
+                            Middleware.c_select_blind()
+                        end)
+                    end, 0.0)
+            elseif G.GAME.PACK_INTERRUPT == G.STATES.SHOP then
+                queueaction(function()
+                    sendDebugMessage("Queueing shop action!")
                     firewhenready(function()
-                        return G.STATE_COMPLETE and G.STATE == G.STATES.BLIND_SELECT
+                        return G.STATE_COMPLETE and G.STATE == G.STATES.SHOP
                     end, function()
                         Middleware.choosingboostercards = false
-                        Middleware.c_select_blind()
+                        Middleware.c_shop()
                     end)
                 end, 0.0)
-        elseif G.GAME.PACK_INTERRUPT == G.STATES.SHOP then
-            queueaction(function()
-                sendDebugMessage("Queueing shop action!")
-                firewhenready(function()
-                    return G.STATE_COMPLETE and G.STATE == G.STATES.SHOP
-                end, function()
-                    Middleware.choosingboostercards = false
-                    Middleware.c_shop()
-                end)
-            end, 0.0)
+            end
         end
     end)
-
 end
+
 
 function Middleware.c_shop()
 
@@ -344,17 +386,20 @@ function Middleware.c_shop()
         elseif _action == Bot.ACTIONS.REROLL_SHOP then
             pushbutton(Middleware.BUTTONS.REROLL)
         elseif _action == Bot.ACTIONS.BUY_CARD then
-            clickcard(_choices[Bot.ACTIONS.BUY_CARD][_card[1]])
-            usecard(_choices[Bot.ACTIONS.BUY_CARD][_card[1]])
+            clickcard(G.shop_jokers.cards[_card[1]])
+            usecard(G.shop_jokers.cards[_card[1]])
         elseif _action == Bot.ACTIONS.BUY_VOUCHER then
-            clickcard(_choices[Bot.ACTIONS.BUY_VOUCHER][_card[1]])
-            usecard(_choices[Bot.ACTIONS.BUY_VOUCHER][_card[1]])
+            clickcard(G.shop_vouchers.cards[_card[1]])
+            usecard(G.shop_vouchers.cards[_card[1]])
         elseif _action == Bot.ACTIONS.BUY_BOOSTER then
             _done_shopping = true
-            clickcard(_choices[Bot.ACTIONS.BUY_BOOSTER][_card[1]])
-            usecard(_choices[Bot.ACTIONS.BUY_BOOSTER][_card[1]])
+            clickcard(G.shop_booster.cards[_card[1]])
+            usecard(G.shop_booster.cards[_card[1]])
+        elseif _action == Bot.ACTIONS.SELL_JOKER then
+            clickcard(G.shop_jokers.cards[_card[1]])
+            usecard(G.shop_jokers.cards[_card[1]])
         end
-    
+
         if not _done_shopping then
             queueaction(function()
                 firewhenready(function()
@@ -428,27 +473,30 @@ function Middleware.c_use_or_sell_consumables()
 
     firewhenready(function()
         local _action, _cards = Bot.use_or_sell_consumables()
-        if _action then
+        if _action and _cards then
             return true, _action, _cards
+        elseif _action then
+            return true, _action, nil
         else
             return false
         end
     end,
 
     function(_action, _cards)
-        Middleware.c_rearrange_consumables()
-
-        if _cards then
-            -- TODO implement this
-
+        if _action == Bot.ACTIONS.USE_CONSUMABLE and _cards then
+            for i = 1, #_cards do
+                clickcard(G.consumables.cards[_cards[i]])
+                usecard(G.consumables.cards[_cards[i]])
+            end
         end
+        Middleware.c_rearrange_consumables()
     end)
 
 end
 
 
 function Middleware.c_rearrange_jokers()
-
+    
     firewhenready(function()
         local _action, _order = Bot.rearrange_jokers()
         if _action then
@@ -476,29 +524,40 @@ function Middleware.c_rearrange_jokers()
 
 end
 
-function Middleware.c_sell_jokers()
-    
-    firewhenready(function()
-        local _action, _cards = Bot.sell_jokers()
-        if _action then
-            return true, _action, _cards
-        else
-            return false
-        end
-    end,
+-- function Middleware.c_sell_jokers()
 
-    function(_action, _cards)
-        Middleware.c_rearrange_jokers()
+--     sendDebugMessage("Start of outer sell joker function!")
+--     if not G.jokers.cards then return end
 
-        if _action == Bot.ACTIONS.SELL_JOKER and _cards then
-            for i = 1, #_cards do
-                clickcard(G.jokers.cards[_cards[i]])
-                usecard(G.jokers.cards[_cards[i]])
-            end
-        end
-    end)
+--     firewhenready(function()
+--         local _action, _cards = Bot.sell_jokers()
+--         if _action and _cards ~= nil then
+--             sendDebugMessage('action and cards')
+--             sendDebugMessage(_action)
+--             sendDebugMessage(_cards)
+--             return true, _action, _cards
+--         elseif _action then
+--             sendDebugMessage('action')
+--             sendDebugMessage(_action)
+--             return true, _action, nil
+--         else
+--             sendDebugMessage('no action or cards')
+--             return false
+--         end
+--     end,
 
-end
+--     function(_action, _cards)
+--         sendDebugMessage("Reached the inner function for sell jokers!")
+--         if _action == Bot.ACTIONS.SELL_JOKER and _cards then
+--             for i = 1, #_cards do
+--                 sendDebugMessage("trying to click a joker!")
+--                 clickcard(G.jokers.cards[_cards[i]])
+--                 usecard(G.jokers.cards[_cards[i]])
+--             end
+--         end
+--         Middleware.c_rearrange_jokers()
+--     end)
+-- end
 
 function Middleware.c_start_run()
 
@@ -571,7 +630,7 @@ local function c_initgamehooks()
         firewhenready(function()
             return G.buttons and G.STATE_COMPLETE and G.STATE == G.STATES.SELECTING_HAND
         end, function()
-            Middleware.c_sell_jokers()
+            Middleware.c_rearrange_jokers()
         end)
     end)
 
