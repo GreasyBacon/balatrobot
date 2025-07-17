@@ -447,6 +447,7 @@ function Middleware.c_shop()
             clickcard(G.shop_vouchers.cards[_card[1]])
             usecard(G.shop_vouchers.cards[_card[1]])
         elseif _action == Bot.ACTIONS.BUY_BOOSTER then
+            _done_shopping = true
             sendDebugMessage("BUY BOOSTER")
             clickcard(G.shop_booster.cards[_card[1]])
             usecard(G.shop_booster.cards[_card[1]])
