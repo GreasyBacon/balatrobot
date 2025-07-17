@@ -261,7 +261,7 @@ class Bot:
                 msg = bytes("HELLO", "utf-8")
                 s.sendto(msg, self.addr)
                 try:
-                    time.sleep(0.5)
+                    time.sleep(1)
                     data, _ = s.recvfrom(65536)
                     jsondata = json.loads(data)
                     if "response" in jsondata:
@@ -276,8 +276,8 @@ class Bot:
 
                             cmdstr = self.actionToCmd(action)
                             msg = bytes(cmdstr, "utf-8")
-                            time.sleep(1)
                             s.sendto(msg, self.addr)
+                            time.sleep(1.5)
                 except socket.error as e:
                     print(e)
                     print("Socket error, reconnecting...")

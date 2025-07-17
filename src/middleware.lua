@@ -194,7 +194,9 @@ function Middleware.c_play_hand()
     
     function(_action, _cards_to_play)
         for i = 1, #_cards_to_play do
-            clickcard(G.hand.cards[_cards_to_play[i]])
+            if G.hand and G.hand.cards and G.hand.cards[_cards_to_play[i]] then
+                clickcard(G.hand.cards[_cards_to_play[i]])
+            end
         end
     
         -- Option 1: Play Hand
@@ -254,7 +256,12 @@ function Middleware.c_choose_booster_cards()
     sendDebugMessage("Passed checks!")
 
     firewhenready(function()
-        local _action, _card, _hand_cards = Bot.select_booster_action(G.pack_cards.cards, G.hand.cards)
+        local _action = 0
+        local _card = nil
+        local _hand_cards = nil
+        if G.pack_cards and G.pack_cards.cards and G.hand and G.hand.cards then
+            _action, _card, _hand_cards = Bot.select_booster_action(G.pack_cards.cards, G.hand.cards)
+        end
         if _action then
             return true, _action, _card, _hand_cards
         else
@@ -276,22 +283,25 @@ function Middleware.c_choose_booster_cards()
                             Middleware.c_select_blind()
                         end)
                     end, 0.0)
+                return
             elseif G.GAME.PACK_INTERRUPT == G.STATES.SHOP then
                 queueaction(function()
-                    sendDebugMessage("Queueing shop action!")
+                    sendDebugMessage("Queueing shop action! - c_choose_booster_cards")
                     firewhenready(function()
                         return G.STATE_COMPLETE and G.STATE == G.STATES.SHOP
                     end, function()
                         Middleware.choosingboostercards = false
                         Middleware.c_shop()
                     end)
-                end, 0.0)
+                end, 0)
+                Middleware.choosingboostercards = true
+                return
             end
         elseif _action == Bot.ACTIONS.SELECT_BOOSTER_CARD then
             -- Defensive: Ensure _card and _card[1] are valid
             local card_index = _card and _card[1]
             local selected_card = nil
-            if card_index and G.pack_cards and G.pack_cards.cards then
+            if card_index and G.pack_cards and G.pack_cards.cards and G.pack_cards.cards[card_index] then
                 selected_card = card_index and G.pack_cards.cards[card_index]
             end
             local max_highlighted = 0
@@ -349,16 +359,19 @@ function Middleware.c_choose_booster_cards()
                             Middleware.c_select_blind()
                         end)
                     end, 0.0)
+                return
             elseif G.GAME.PACK_INTERRUPT == G.STATES.SHOP then
                 queueaction(function()
-                    sendDebugMessage("Queueing shop action!")
+                    sendDebugMessage("Queueing shop action! - c_choose_booster_cards")
                     firewhenready(function()
                         return G.STATE_COMPLETE and G.STATE == G.STATES.SHOP
                     end, function()
                         Middleware.choosingboostercards = false
                         Middleware.c_shop()
                     end)
-                end, 0.0)
+                end, 0)
+                Middleware.choosingboostercards = true
+                return
             end
         end
     end)
@@ -373,21 +386,24 @@ function Middleware.c_shop()
     local _b_reroll_shop = Middleware.BUTTONS.REROLL and Middleware.BUTTONS.REROLL.config and Middleware.BUTTONS.REROLL.config.button
 
     local _cards_to_buy = { }
-    if G.shop_jokers.cards and #G.shop_jokers.cards > 0 then
+    sendDebugMessage("shop_jokers cards")
+    if G.shop_jokers and G.shop_jokers.cards then
         for i = 1, #G.shop_jokers.cards do
             _cards_to_buy[i] = G.shop_jokers.cards[i].cost <= G.GAME.dollars and G.shop_jokers.cards[i] or nil
         end
     end
 
     local _vouchers_to_buy = { }
-    if G.shop_vouchers.cards and #G.shop_vouchers.cards > 0 then
+    sendDebugMessage("shop_vouchers cards")
+    if G.shop_vouchers and G.shop_vouchers.cards then
         for i = 1, #G.shop_vouchers.cards do
             _vouchers_to_buy[i] = G.shop_vouchers.cards[i].cost <= G.GAME.dollars and G.shop_vouchers.cards[i] or nil
         end
     end
 
     local _boosters_to_buy = { }
-    if G.shop_booster.cards and #G.shop_booster.cards > 0 then
+    sendDebugMessage("shop_boosters cards")
+    if G.shop_booster and G.shop_booster.cards then
         for i = 1, #G.shop_booster.cards do
             _boosters_to_buy[i] = G.shop_booster.cards[i].cost <= G.GAME.dollars and G.shop_booster.cards[i] or nil
         end
@@ -399,11 +415,15 @@ function Middleware.c_shop()
     _choices[Bot.ACTIONS.BUY_CARD] = #_cards_to_buy > 0 and _cards_to_buy or nil
     _choices[Bot.ACTIONS.BUY_VOUCHER] = #_vouchers_to_buy > 0 and _vouchers_to_buy or nil
     _choices[Bot.ACTIONS.BUY_BOOSTER] = #_boosters_to_buy > 0 and _boosters_to_buy or nil
-    
+
     firewhenready(function()
-        local _action, _card = Bot.select_shop_action(_choices)
-        if _action then
-            return true, _action, _card
+        if G.shop_jokers and G.shop_jokers.cards and G.shop_vouchers and G.shop_vouchers.cards and G.shop_booster and G.shop_booster.cards then
+            local _action, _card = Bot.select_shop_action(_choices)
+            if _action then
+                return true, _action, _card
+            else
+                return false
+            end
         else
             return false
         end
@@ -412,21 +432,30 @@ function Middleware.c_shop()
     function(_action, _card)
         sendDebugMessage("hello!")
         if _action == Bot.ACTIONS.END_SHOP then
+            sendDebugMessage("END SHOP")
             pushbutton(Middleware.BUTTONS.NEXT_ROUND)
             _done_shopping = true
         elseif _action == Bot.ACTIONS.REROLL_SHOP then
-            pushbutton(Middleware.BUTTONS.REROLL)
+            sendDebugMessage("REROLL SHOP")
+            pushbutton(Middleware.BUTTONS.REROLL, 1)
         elseif _action == Bot.ACTIONS.BUY_CARD then
+            sendDebugMessage("BUY JOKER")
             clickcard(G.shop_jokers.cards[_card[1]])
             usecard(G.shop_jokers.cards[_card[1]])
         elseif _action == Bot.ACTIONS.BUY_VOUCHER then
+            sendDebugMessage("BUY VOUCHER")
             clickcard(G.shop_vouchers.cards[_card[1]])
             usecard(G.shop_vouchers.cards[_card[1]])
         elseif _action == Bot.ACTIONS.BUY_BOOSTER then
-            _done_shopping = true
+            sendDebugMessage("BUY BOOSTER")
             clickcard(G.shop_booster.cards[_card[1]])
             usecard(G.shop_booster.cards[_card[1]])
+            queueaction(function()
+                Middleware.choosingboostercards = false
+                Middleware.c_choose_booster_cards()
+            end, 1.0)
         elseif _action == Bot.ACTIONS.SELL_JOKER then
+            sendDebugMessage("SELL JOKER")
             clickcard(G.jokers.cards[_card[1]])
             sellcard(G.jokers.cards[_card[1]])
         end
